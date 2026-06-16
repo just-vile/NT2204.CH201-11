@@ -1,0 +1,28 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>NU1902;NU1903;NU1904</WarningsNotAsErrors>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+    <UseSharedCompilation>false</UseSharedCompilation>
+    <RootNamespace>Saga.$(MSBuildProjectName.Replace('Saga.',''))</RootNamespace>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <MassTransitVersion>8.2.5</MassTransitVersion>
+    <EFCoreVersion>8.0.10</EFCoreVersion>
+    <NpgsqlEFCoreVersion>8.0.10</NpgsqlEFCoreVersion>
+    <OpenTelemetryVersion>1.10.0</OpenTelemetryVersion>
+    <OpenTelemetryInstrumentationVersion>1.10.0</OpenTelemetryInstrumentationVersion>
+    <OpenTelemetryEFInstrumentationVersion>1.0.0-beta.12</OpenTelemetryEFInstrumentationVersion>
+    <SerilogAspNetCoreVersion>8.0.3</SerilogAspNetCoreVersion>
+    <PollyVersion>8.4.2</PollyVersion>
+    <PrometheusNetVersion>8.2.1</PrometheusNetVersion>
+    <HealthChecksVersion>8.0.2</HealthChecksVersion>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,14 @@
+# build artifacts (rebuilt inside containers)
+**/bin
+**/obj
+**/.vs
+.git
+.gitignore
+.dockerignore
+README.md
+docs/
+tests/
+*.user
+*.suo
+*.log
+appsettings.*.local.json

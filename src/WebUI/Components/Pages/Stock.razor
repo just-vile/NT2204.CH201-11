@@ -1,0 +1,67 @@
+@page "/stock"
+@inject InventoryApiClient InventoryApi
+
+<h1>Stock</h1>
+<p class="muted">Look up available stock for a SKU. Try the seeded items: <span class="mono">SKU-001</span> (100), <span class="mono">SKU-002</span> (50), <span class="mono">SKU-003</span> (10), <span class="mono">OUT_OF_STOCK-X</span> (0).</p>
+
+<div class="card">
+    <div class="form-row">
+        <label>SKU</label>
+        <div class="row">
+            <input class="mono" style="flex: 1;" @bind="_sku" @bind:event="oninput" />
+            <button class="btn btn-primary" @onclick="LookupAsync" disabled="@_loading">
+                @if (_loading) { <span class="spinner"></span> <span>&nbsp;Checking…</span> }
+                else { <span>Check</span> }
+            </button>
+        </div>
+    </div>
+
+    @if (_error is not null)
+    {
+        <div class="alert alert-error">@_error</div>
+    }
+    else if (_result is not null)
+    {
+        <div class="alert alert-info">
+            <strong>@_result.Sku</strong>: <strong>@_result.Available</strong> available
+            @if (_result.Available == 0) { <span class="badge badge-failed" style="margin-left: .5rem;">Out of stock</span> }
+            else if (_result.Available < 10) { <span class="badge badge-warn" style="margin-left: .5rem;">Low</span> }
+            else { <span class="badge badge-success" style="margin-left: .5rem;">In stock</span> }
+        </div>
+    }
+    else if (_searched)
+    {
+        <div class="alert alert-error">SKU not found.</div>
+    }
+</div>
+
+@code {
+    private string _sku = "SKU-001";
+    private StockDto? _result;
+    private bool _loading;
+    private bool _searched;
+    private string? _error;
+
+    private async Task LookupAsync()
+    {
+        _error = null;
+        _result = null;
+        _searched = false;
+        if (string.IsNullOrWhiteSpace(_sku)) { _error = "SKU required"; return; }
+
+        _loading = true;
+        try
+        {
+            _result = await InventoryApi.GetStockAsync(_sku.Trim());
+            _searched = true;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

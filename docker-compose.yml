@@ -1,0 +1,214 @@
+# Local development stack for the choreography saga.
+# - RabbitMQ (broker)
+# - Postgres (one container, multiple databases)
+# - Jaeger (traces, OTLP receiver on 4317/4318)
+# - OTel Collector (single ingress; fans out to Jaeger + Prometheus)
+# - Prometheus + Grafana (metrics + dashboards)
+# - 4 saga services
+#
+# Bring up everything: docker compose up --build
+# Bring up only platform: docker compose up rabbitmq postgres jaeger otel-collector prometheus grafana
+
+name: saga
+
+x-otlp-env: &otlp-env
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+  OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+
+x-rabbit-env: &rabbit-env
+  RabbitMq__Host: rabbitmq
+  RabbitMq__Username: saga
+  RabbitMq__Password: saga
+  RabbitMq__VirtualHost: /
+
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: saga-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: saga
+      RABBITMQ_DEFAULT_PASS: saga
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # mgmt UI
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [saga]
+
+  postgres:
+    image: postgres:16
+    container_name: saga-postgres
+    environment:
+      POSTGRES_USER: saga
+      POSTGRES_PASSWORD: saga
+      POSTGRES_DB: postgres
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./build/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U saga"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [saga]
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.60
+    container_name: saga-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686" # UI
+      - "14268:14268"
+    networks: [saga]
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.108.0
+    container_name: saga-otelcol
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./build/observability/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8889:8889"   # Prometheus exporter (collector internal metrics)
+    depends_on: [jaeger]
+    networks: [saga]
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: saga-prometheus
+    volumes:
+      - ./build/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ["9090:9090"]
+    networks: [saga]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: saga-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+    volumes:
+      - ./build/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./build/observability/grafana/provisioning/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["3000:3000"]
+    depends_on: [prometheus]
+    networks: [saga]
+
+  order-service:
+    build:
+      context: .
+      dockerfile: build/docker/Dockerfile.dotnet
+      args:
+        SERVICE_NAME: OrderService
+    image: saga/order-service:dev
+    container_name: saga-order
+    environment:
+      <<: [*otlp-env, *rabbit-env]
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=orders;Username=saga;Password=saga
+      ASPNETCORE_ENVIRONMENT: Development
+    ports: ["5001:8080"]
+    depends_on:
+      rabbitmq: {condition: service_healthy}
+      postgres: {condition: service_healthy}
+      otel-collector: {condition: service_started}
+    networks: [saga]
+
+  payment-service:
+    build:
+      context: .
+      dockerfile: build/docker/Dockerfile.dotnet
+      args:
+        SERVICE_NAME: PaymentService
+    image: saga/payment-service:dev
+    container_name: saga-payment
+    environment:
+      <<: [*otlp-env, *rabbit-env]
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=payments;Username=saga;Password=saga
+      ASPNETCORE_ENVIRONMENT: Development
+    ports: ["5002:8080"]
+    depends_on:
+      rabbitmq: {condition: service_healthy}
+      postgres: {condition: service_healthy}
+      otel-collector: {condition: service_started}
+    networks: [saga]
+
+  inventory-service:
+    build:
+      context: .
+      dockerfile: build/docker/Dockerfile.dotnet
+      args:
+        SERVICE_NAME: InventoryService
+    image: saga/inventory-service:dev
+    container_name: saga-inventory
+    environment:
+      <<: [*otlp-env, *rabbit-env]
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=inventory;Username=saga;Password=saga
+      ASPNETCORE_ENVIRONMENT: Development
+    ports: ["5003:8080"]
+    depends_on:
+      rabbitmq: {condition: service_healthy}
+      postgres: {condition: service_healthy}
+      otel-collector: {condition: service_started}
+    networks: [saga]
+
+  shipping-service:
+    build:
+      context: .
+      dockerfile: build/docker/Dockerfile.dotnet
+      args:
+        SERVICE_NAME: ShippingService
+    image: saga/shipping-service:dev
+    container_name: saga-shipping
+    environment:
+      <<: [*otlp-env, *rabbit-env]
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=shipping;Username=saga;Password=saga
+      ASPNETCORE_ENVIRONMENT: Development
+    ports: ["5004:8080"]
+    depends_on:
+      rabbitmq: {condition: service_healthy}
+      postgres: {condition: service_healthy}
+      otel-collector: {condition: service_started}
+    networks: [saga]
+
+  web-ui:
+    build:
+      context: .
+      dockerfile: build/docker/Dockerfile.dotnet
+      args:
+        SERVICE_NAME: WebUI
+    image: saga/web-ui:dev
+    container_name: saga-webui
+    environment:
+      <<: *otlp-env
+      Apis__Order: http://order-service:8080
+      Apis__Payment: http://payment-service:8080
+      Apis__Inventory: http://inventory-service:8080
+      Apis__Shipping: http://shipping-service:8080
+      ExternalLinks__Jaeger: http://localhost:16686
+      ExternalLinks__RabbitMq: http://localhost:15672
+      ExternalLinks__Grafana: http://localhost:3000
+      ExternalLinks__Prometheus: http://localhost:9090
+      ASPNETCORE_ENVIRONMENT: Development
+    ports: ["5000:8080"]
+    depends_on:
+      - order-service
+      - payment-service
+      - inventory-service
+      - shipping-service
+    networks: [saga]
+
+volumes:
+  pgdata:
+
+networks:
+  saga:
+    driver: bridge

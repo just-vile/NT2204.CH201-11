@@ -1,0 +1,33 @@
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+  external_labels:
+    cluster: saga-local
+
+scrape_configs:
+  # OTel collector relays application metrics here.
+  - job_name: otel-collector
+    static_configs:
+      - targets: ["otel-collector:8889"]
+
+  # Each service also exposes /metrics directly (Prometheus exporter on the AspNetCore pipeline).
+  - job_name: order-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["order-service:8080"]
+  - job_name: payment-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["payment-service:8080"]
+  - job_name: inventory-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["inventory-service:8080"]
+  - job_name: shipping-service
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["shipping-service:8080"]
+  - job_name: web-ui
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["web-ui:8080"]

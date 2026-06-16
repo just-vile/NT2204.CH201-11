@@ -1,0 +1,45 @@
+# Multi-stage build for any service in src/<ServiceName>/Saga.<ServiceName>.csproj
+# Pass SERVICE_NAME=OrderService|PaymentService|InventoryService|ShippingService
+ARG DOTNET_VERSION=8.0
+ARG SERVICE_NAME=OrderService
+
+# ---------- restore ----------
+FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION} AS restore
+ARG SERVICE_NAME
+WORKDIR /src
+
+COPY Directory.Build.props global.json ./
+COPY src/Shared/Saga.Shared.Contracts/*.csproj src/Shared/Saga.Shared.Contracts/
+COPY src/Shared/Saga.Shared.Infrastructure/*.csproj src/Shared/Saga.Shared.Infrastructure/
+COPY src/${SERVICE_NAME}/*.csproj src/${SERVICE_NAME}/
+
+RUN dotnet restore "src/${SERVICE_NAME}/Saga.${SERVICE_NAME}.csproj"
+
+# ---------- build & publish ----------
+FROM restore AS publish
+ARG SERVICE_NAME
+COPY src/Shared/ src/Shared/
+COPY src/${SERVICE_NAME}/ src/${SERVICE_NAME}/
+
+RUN dotnet publish "src/${SERVICE_NAME}/Saga.${SERVICE_NAME}.csproj" \
+        -c Release \
+        -o /app/publish \
+        --no-restore \
+        /p:UseAppHost=false
+
+# ---------- runtime ----------
+FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION} AS runtime
+ARG SERVICE_NAME
+ENV ASPNETCORE_URLS=http://+:8080 \
+    DOTNET_RUNNING_IN_CONTAINER=true \
+    DOTNET_PRINT_TELEMETRY_MESSAGE=false \
+    SAGA_SERVICE_NAME=${SERVICE_NAME}
+WORKDIR /app
+
+# The aspnet:8.0 base image already ships a non-root `app` user, so we just use it.
+COPY --from=publish --chown=app:app /app/publish ./
+USER app
+
+EXPOSE 8080
+ENV ENTRY_DLL=Saga.${SERVICE_NAME}.dll
+ENTRYPOINT ["sh", "-c", "exec dotnet ${ENTRY_DLL}"]

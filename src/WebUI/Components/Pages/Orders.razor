@@ -1,0 +1,110 @@
+@page "/orders"
+@inject OrderTracker Tracker
+@inject OrderApiClient OrderApi
+@implements IAsyncDisposable
+
+<h1>Recent orders</h1>
+<p class="muted">Orders placed via this UI in the last hour or two (capped at 50). Status is fetched live from order-service.</p>
+
+<div class="card">
+    @if (_rows.Count == 0)
+    {
+        <div class="muted">No orders yet. <a href="place-order">Place one</a>.</div>
+    }
+    else
+    {
+        <table>
+            <thead>
+                <tr>
+                    <th>Placed at</th>
+                    <th>Order Id</th>
+                    <th>Label</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in _rows)
+                {
+                    <tr>
+                        <td class="mono">@row.PlacedAt.LocalDateTime.ToString("HH:mm:ss")</td>
+                        <td class="mono">@row.Id</td>
+                        <td>@row.Label</td>
+                        <td><span class="badge @StatusBadgeClass(row.Status)">@(row.Status ?? "…")</span></td>
+                        <td><a class="btn btn-ghost" href="orders/@row.Id">Open</a></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@code {
+    private record Row(Guid Id, string Label, DateTimeOffset PlacedAt)
+    {
+        public string? Status { get; set; }
+    }
+
+    private List<Row> _rows = new();
+    private CancellationTokenSource _cts = new();
+    private Task? _loop;
+
+    protected override Task OnInitializedAsync()
+    {
+        _rows = Tracker.Recent.Select(t => new Row(t.Id, t.Label, t.PlacedAt)).ToList();
+        _loop = LoopAsync(_cts.Token);
+        return Task.CompletedTask;
+    }
+
+    private async Task LoopAsync(CancellationToken ct)
+    {
+        try
+        {
+            await RefreshAsync(ct);
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                await RefreshAsync(ct);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task RefreshAsync(CancellationToken ct)
+    {
+        // sync tracker additions (other tabs may have placed orders)
+        var current = Tracker.Recent;
+        _rows = current.Select(t =>
+        {
+            var existing = _rows.FirstOrDefault(r => r.Id == t.Id);
+            return new Row(t.Id, t.Label, t.PlacedAt) { Status = existing?.Status };
+        }).ToList();
+
+        var fetches = _rows.Select(async r =>
+        {
+            try
+            {
+                var dto = await OrderApi.GetAsync(r.Id, ct);
+                r.Status = dto?.Status;
+            }
+            catch { /* ignore — keep previous status */ }
+        });
+        await Task.WhenAll(fetches);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private static string StatusBadgeClass(string? status) => status switch
+    {
+        "Completed" => "badge-success",
+        "Cancelled" => "badge-failed",
+        "Pending"   => "badge-pending",
+        _ => "badge-muted"
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        _cts.Cancel();
+        if (_loop is not null) { try { await _loop; } catch { } }
+        _cts.Dispose();
+    }
+}

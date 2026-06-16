@@ -1,0 +1,127 @@
+# Bumps the sibling gitops repo's per-service image.tag to sha-<commit> on every
+# successful push-to-main CI run, then opens a PR.
+#
+# Configuration:
+#   secret  GITOPS_TOKEN  -- PAT with `contents:write` + `pull-requests:write` on
+#                            the gitops repo. The default GITHUB_TOKEN cannot
+#                            modify a *different* repository, so a PAT is required.
+#   var     GITOPS_REPO   -- optional override, e.g. "my-org/saga-gitops".
+#                            Defaults to "${owner}/saga-gitops".
+#
+# If the gitops repo does not yet exist (the contract may be pushed before gitops
+# is bootstrapped) the workflow exits 0 with a warning so it never blocks merges.
+name: bump-gitops
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    env:
+      GITOPS_REPO: ${{ vars.GITOPS_REPO != '' && vars.GITOPS_REPO || format('{0}/saga-gitops', github.repository_owner) }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Compute short sha
+        id: sha
+        run: echo "short=$(echo "${HEAD_SHA}" | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
+      - name: Probe gitops repo
+        id: probe
+        env:
+          GH_TOKEN: ${{ secrets.GITOPS_TOKEN }}
+        run: |
+          if [[ -z "${GH_TOKEN:-}" ]]; then
+            echo "::warning::GITOPS_TOKEN secret is not set; skipping gitops bump."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if gh repo view "${GITOPS_REPO}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::gitops repo ${GITOPS_REPO} not found; skipping bump (likely parallel bootstrap)."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout gitops
+        if: steps.probe.outputs.exists == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.GITOPS_REPO }}
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: gitops
+          ref: main
+
+      - name: Install yq
+        if: steps.probe.outputs.exists == 'true'
+        run: |
+          set -euo pipefail
+          sudo wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
+          sudo chmod +x /usr/local/bin/yq
+          yq --version
+
+      - name: Bump image tags
+        if: steps.probe.outputs.exists == 'true'
+        working-directory: gitops
+        run: |
+          set -euo pipefail
+          TAG="sha-${HEAD_SHA}"
+          for svc in order-service payment-service inventory-service shipping-service web-ui; do
+            file="environments/local/values-${svc}.yaml"
+            if [[ ! -f "$file" ]]; then
+              echo "::warning::missing $file; skipping"
+              continue
+            fi
+            yq -i ".image.tag = \"${TAG}\"" "$file"
+            echo "bumped $file -> image.tag=${TAG}"
+          done
+
+      - name: Open PR
+        if: steps.probe.outputs.exists == 'true'
+        working-directory: gitops
+        env:
+          GH_TOKEN: ${{ secrets.GITOPS_TOKEN }}
+        run: |
+          set -euo pipefail
+          BRANCH="bump/${{ steps.sha.outputs.short }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet -- environments/local/; then
+            echo "::notice::no value-file changes; nothing to bump."
+            exit 0
+          fi
+
+          git checkout -b "${BRANCH}"
+          git add environments/local/
+          git commit -m "chore: bump images to ${{ steps.sha.outputs.short }}"
+          git push --set-upstream origin "${BRANCH}"
+
+          BODY=$(cat <<EOF
+          Bumps \`image.tag\` to \`sha-${HEAD_SHA}\` for the saga services.
+
+          Triggered by application-repo CI run [${{ github.event.workflow_run.id }}](${{ github.event.workflow_run.html_url }}).
+
+          Updated:
+          - environments/local/values-order-service.yaml
+          - environments/local/values-payment-service.yaml
+          - environments/local/values-inventory-service.yaml
+          - environments/local/values-shipping-service.yaml
+          - environments/local/values-web-ui.yaml
+          EOF
+          )
+
+          gh pr create \
+            --title "chore: bump images to ${{ steps.sha.outputs.short }}" \
+            --body "$BODY" \
+            --base main \
+            --head "${BRANCH}"

@@ -1,0 +1,112 @@
+@page "/"
+@inject OrderApiClient OrderApi
+@inject PaymentApiClient PaymentApi
+@inject InventoryApiClient InventoryApi
+@inject ShippingApiClient ShippingApi
+@implements IAsyncDisposable
+
+<h1>Saga choreography demo</h1>
+<p class="muted">An e-commerce order travels through 4 services purely via events. Try a happy path or trigger a failure mode and watch the compensations fire — live.</p>
+
+<div class="card">
+    <h2>Service health</h2>
+    <p class="muted">Pinged once on load and every 5 seconds.</p>
+    <div class="grid grid-4">
+        @foreach (var s in _services)
+        {
+            <div class="card" style="margin: 0;">
+                <div class="row" style="justify-content: space-between;">
+                    <h3>@s.Name</h3>
+                    @if (_loading)
+                    {
+                        <span class="spinner" aria-label="checking"></span>
+                    }
+                    else
+                    {
+                        <span class="badge @(s.Ready ? "badge-success" : "badge-failed")">
+                            @(s.Ready ? "Ready" : "Down")
+                        </span>
+                    }
+                </div>
+                <div class="muted mono" style="margin-top: .35rem;">@s.BaseUrl</div>
+            </div>
+        }
+    </div>
+</div>
+
+<div class="card">
+    <h2>How the saga flows</h2>
+    <ol style="margin: 0; padding-left: 1.25rem; line-height: 1.8;">
+        <li><strong>order-service</strong> publishes <span class="mono">OrderPlaced</span></li>
+        <li><strong>inventory-service</strong> reserves stock provisionally → <span class="mono">InventoryReserved</span> or <span class="mono">InventoryUnavailable</span></li>
+        <li><strong>payment-service</strong> charges the card → <span class="mono">PaymentSucceeded</span> or <span class="mono">PaymentFailed</span></li>
+        <li><strong>shipping-service</strong> dispatches → <span class="mono">ShipmentDispatched</span></li>
+        <li><strong>order-service</strong> finalises → <span class="mono">OrderCompleted</span> / <span class="mono">OrderCancelled</span> with compensations</li>
+    </ol>
+</div>
+
+<div class="row">
+    <a href="place-order" class="btn btn-primary">Place an order</a>
+    <a href="orders" class="btn btn-ghost">View recent orders</a>
+</div>
+
+@code {
+    private record ServiceStatus(string Name, string BaseUrl)
+    {
+        public bool Ready { get; set; }
+    }
+
+    private ServiceStatus[] _services = Array.Empty<ServiceStatus>();
+    private bool _loading = true;
+    private CancellationTokenSource _cts = new();
+    private Task? _loop;
+
+    protected override Task OnInitializedAsync()
+    {
+        _services = new[]
+        {
+            new ServiceStatus("order-service", OrderApi.Http.BaseAddress?.ToString() ?? ""),
+            new ServiceStatus("payment-service", PaymentApi.Http.BaseAddress?.ToString() ?? ""),
+            new ServiceStatus("inventory-service", InventoryApi.Http.BaseAddress?.ToString() ?? ""),
+            new ServiceStatus("shipping-service", ShippingApi.Http.BaseAddress?.ToString() ?? "")
+        };
+        _loop = LoopAsync(_cts.Token);
+        return Task.CompletedTask;
+    }
+
+    private async Task LoopAsync(CancellationToken ct)
+    {
+        try
+        {
+            await RefreshAsync(ct);
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                await RefreshAsync(ct);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task RefreshAsync(CancellationToken ct)
+    {
+        var tasks = new[]
+        {
+            OrderApi.IsReadyAsync(ct),
+            PaymentApi.IsReadyAsync(ct),
+            InventoryApi.IsReadyAsync(ct),
+            ShippingApi.IsReadyAsync(ct)
+        };
+        var results = await Task.WhenAll(tasks);
+        for (int i = 0; i < _services.Length; i++) _services[i].Ready = results[i];
+        _loading = false;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _cts.Cancel();
+        if (_loop is not null) { try { await _loop; } catch { } }
+        _cts.Dispose();
+    }
+}

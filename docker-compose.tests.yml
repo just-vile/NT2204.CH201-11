@@ -1,0 +1,45 @@
+# Runs the saga integration tests entirely inside a container.
+#
+# The test container talks to Docker Desktop's daemon via the mounted unix socket
+# (docker-out-of-docker) so that Testcontainers can spin up sibling Postgres +
+# RabbitMQ containers. Those siblings are then reached from inside this container
+# via host.docker.internal:<mapped-port> — that's what TESTCONTAINERS_HOST_OVERRIDE
+# tells Testcontainers to use when computing connection URLs.
+#
+# Run from the host (Windows / PowerShell):
+#   docker compose -f app/docker-compose.tests.yml up --build --abort-on-container-exit --exit-code-from integration-tests
+#
+# Notes:
+# - On Windows the `//var/run/docker.sock` form (double leading slash) tells the
+#   Docker Desktop client not to treat the path as a Windows drive.
+# - On Linux the same single-slash path works because Compose just passes it through.
+
+name: saga-tests
+
+services:
+  integration-tests:
+    image: mcr.microsoft.com/dotnet/sdk:8.0
+    working_dir: /src
+    volumes:
+      - ..:/src
+      - //var/run/docker.sock:/var/run/docker.sock
+    environment:
+      DOTNET_CLI_HOME: /tmp
+      DOTNET_NOLOGO: "true"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+      NUGET_PACKAGES: /tmp/nuget
+      # Reach sibling containers (Postgres / RabbitMQ) via the Docker Desktop host gateway.
+      TESTCONTAINERS_HOST_OVERRIDE: host.docker.internal
+      # Belt-and-braces in case Ryuk has trouble talking to the Windows-mounted socket.
+      TESTCONTAINERS_RYUK_DISABLED: "true"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - bash
+      - -c
+      - |
+        dotnet test app/tests/Saga.IntegrationTests/Saga.IntegrationTests.csproj \
+          -c Debug \
+          --logger "console;verbosity=normal" \
+          --results-directory /src/app/tests/Saga.IntegrationTests/TestResults
+    network_mode: bridge

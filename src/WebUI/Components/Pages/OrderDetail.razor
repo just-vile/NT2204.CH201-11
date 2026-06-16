@@ -1,0 +1,359 @@
+@page "/orders/{Id:guid}"
+@inject OrderApiClient OrderApi
+@inject PaymentApiClient PaymentApi
+@inject InventoryApiClient InventoryApi
+@inject ShippingApiClient ShippingApi
+@implements IAsyncDisposable
+
+<h1>
+    Order
+    <span class="mono" style="font-weight: 400; font-size: 1rem;">@Id</span>
+</h1>
+
+@if (_snapshot is null)
+{
+    <div class="muted"><span class="spinner"></span>&nbsp;Loading…</div>
+}
+else if (_snapshot.Order is null)
+{
+    <div class="alert alert-error">Order not found in order-service yet. The DB write may still be in flight; this page will refresh automatically.</div>
+}
+else
+{
+    <div class="card">
+        <div class="row" style="justify-content: space-between;">
+            <div>
+                <h2 style="margin-bottom: .25rem;">
+                    Status:
+                    <span class="badge @OrderBadge(_snapshot.Order.Status)">@_snapshot.Order.Status</span>
+                </h2>
+                <div class="muted">Correlation id <span class="mono">@_snapshot.Order.CorrelationId</span></div>
+            </div>
+            <div class="muted">
+                @if (!_snapshot.IsTerminal)
+                {
+                    <span class="spinner"></span> <span>Polling…</span>
+                }
+                else
+                {
+                    <span>Final.</span>
+                }
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_snapshot.Order.CancellationReason))
+        {
+            <div class="alert alert-error" style="margin-top: 1rem;">
+                Cancelled: <span class="mono">@_snapshot.Order.CancellationReason</span>
+            </div>
+        }
+    </div>
+
+    <div class="card">
+        <h2>Saga timeline</h2>
+        <div class="timeline">
+            @foreach (var step in BuildSteps(_snapshot))
+            {
+                <div class="step @step.CssClass">
+                    <div class="step-name">@step.Name</div>
+                    <div class="step-detail">@step.Detail</div>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="grid grid-2">
+        <div class="card">
+            <h3>Order</h3>
+            <dl class="kv">
+                <dt>Total</dt><dd>@_snapshot.Order.TotalAmount.ToString("N2")</dd>
+                <dt>Customer</dt><dd class="mono">@_snapshot.Order.CustomerId</dd>
+                <dt>Created</dt><dd>@FormatTime(_snapshot.Order.CreatedAt) <span class="muted offset">baseline</span></dd>
+                @if (_snapshot.Order.UpdatedAt is not null)
+                { <dt>Updated</dt><dd>@FormatTime(_snapshot.Order.UpdatedAt.Value) @Offset(_snapshot.Order.UpdatedAt.Value)</dd> }
+            </dl>
+            @if (_snapshot.Order.Items?.Count > 0)
+            {
+                <table style="margin-top: .75rem;">
+                    <thead><tr><th>SKU</th><th>Qty</th><th>Unit</th></tr></thead>
+                    <tbody>
+                        @foreach (var li in _snapshot.Order.Items)
+                        {
+                            <tr>
+                                <td class="mono">@li.Sku</td>
+                                <td>@li.Quantity</td>
+                                <td>@li.UnitPrice.ToString("N2")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+
+        <div class="card">
+            <h3>Payment</h3>
+            @if (_snapshot.Payment is null)
+            { <div class="muted">No payment record yet.</div> }
+            else
+            {
+                <dl class="kv">
+                    <dt>Status</dt><dd><span class="badge @PaymentBadge(_snapshot.Payment.Status)">@_snapshot.Payment.Status</span></dd>
+                    <dt>Amount</dt><dd>@_snapshot.Payment.Amount.ToString("N2")</dd>
+                    <dt>Payment Id</dt><dd class="mono">@_snapshot.Payment.Id</dd>
+                    <dt>Charged at</dt><dd>@FormatTime(_snapshot.Payment.CreatedAt) @Offset(_snapshot.Payment.CreatedAt)</dd>
+                    @if (_snapshot.Payment.FailureReason is not null)
+                    { <dt>Reason</dt><dd>@_snapshot.Payment.FailureReason</dd> }
+                    @if (_snapshot.Payment.RefundedAt is not null)
+                    { <dt>Refunded at</dt><dd>@FormatTime(_snapshot.Payment.RefundedAt.Value) @Offset(_snapshot.Payment.RefundedAt.Value)</dd> }
+                </dl>
+            }
+        </div>
+
+        <div class="card">
+            <h3>Inventory</h3>
+            @if (_snapshot.Reservation is null)
+            { <div class="muted">No reservation yet.</div> }
+            else
+            {
+                <dl class="kv">
+                    <dt>Status</dt><dd><span class="badge @ReservationBadge(_snapshot.Reservation.Status)">@_snapshot.Reservation.Status</span></dd>
+                    <dt>Reservation Id</dt><dd class="mono">@_snapshot.Reservation.Id</dd>
+                    <dt>Reserved at</dt><dd>@FormatTime(_snapshot.Reservation.CreatedAt) @Offset(_snapshot.Reservation.CreatedAt)</dd>
+                    @if (_snapshot.Reservation.ReleasedAt is not null)
+                    { <dt>Released at</dt><dd>@FormatTime(_snapshot.Reservation.ReleasedAt.Value) @Offset(_snapshot.Reservation.ReleasedAt.Value)</dd> }
+                </dl>
+                @if (_snapshot.Reservation.Lines?.Count > 0)
+                {
+                    <table style="margin-top: .5rem;">
+                        <thead><tr><th>SKU</th><th>Qty</th></tr></thead>
+                        <tbody>
+                            @foreach (var l in _snapshot.Reservation.Lines)
+                            {
+                                <tr><td class="mono">@l.Sku</td><td>@l.Quantity</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            }
+        </div>
+
+        <div class="card">
+            <h3>Shipment</h3>
+            @if (_snapshot.Shipment is null)
+            { <div class="muted">No shipment yet.</div> }
+            else
+            {
+                <dl class="kv">
+                    <dt>Status</dt><dd><span class="badge @ShipmentBadge(_snapshot.Shipment.Status)">@_snapshot.Shipment.Status</span></dd>
+                    <dt>Tracking #</dt><dd class="mono">@_snapshot.Shipment.TrackingNumber</dd>
+                    <dt>Shipment Id</dt><dd class="mono">@_snapshot.Shipment.Id</dd>
+                    @if (_snapshot.Shipment.DispatchedAt is not null)
+                    { <dt>Dispatched at</dt><dd>@FormatTime(_snapshot.Shipment.DispatchedAt.Value) @Offset(_snapshot.Shipment.DispatchedAt.Value)</dd> }
+                </dl>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private SagaSnapshot? _snapshot;
+    private CancellationTokenSource _cts = new();
+    private Task? _loop;
+
+    protected override Task OnInitializedAsync()
+    {
+        _loop = LoopAsync(_cts.Token);
+        return Task.CompletedTask;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Restart loop if user navigated to a different order id in the same page instance.
+        if (_loop is null) return;
+        _cts.Cancel();
+        try { await _loop; } catch { }
+        _cts.Dispose();
+        _cts = new CancellationTokenSource();
+        _snapshot = null;
+        _loop = LoopAsync(_cts.Token);
+    }
+
+    private async Task LoopAsync(CancellationToken ct)
+    {
+        try
+        {
+            await RefreshAsync(ct);
+            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(1500));
+            while (!ct.IsCancellationRequested && await timer.WaitForNextTickAsync(ct))
+            {
+                try
+                {
+                    await RefreshAsync(ct);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch
+                {
+                    // Survive transient timer-iteration failures so the loop keeps polling.
+                }
+                if (_snapshot?.IsTerminal == true)
+                {
+                    // One last poll to pick up shipping/payment data that may arrive a beat after status finalises.
+                    await Task.Delay(TimeSpan.FromSeconds(1), ct);
+                    try { await RefreshAsync(ct); } catch (OperationCanceledException) { throw; } catch { }
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task RefreshAsync(CancellationToken ct)
+    {
+        try
+        {
+            // Fetch each backend independently. If one service is down, its slot stays at the
+            // previous snapshot value (or null) instead of poisoning the whole page.
+            var prev = _snapshot;
+            var orderTask = TryFetchAsync(() => OrderApi.GetAsync(Id, ct), prev?.Order);
+            var payTask = TryFetchAsync(() => PaymentApi.GetByOrderAsync(Id, ct), prev?.Payment);
+            var resTask = TryFetchAsync(() => InventoryApi.GetReservationByOrderAsync(Id, ct), prev?.Reservation);
+            var shipTask = TryFetchAsync(() => ShippingApi.GetByOrderAsync(Id, ct), prev?.Shipment);
+
+            await Task.WhenAll(orderTask, payTask, resTask, shipTask);
+
+            _snapshot = new SagaSnapshot(orderTask.Result, payTask.Result, resTask.Result, shipTask.Result);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch
+        {
+            // Per-call isolation already handles backend failures; this guard is a backstop
+            // so a stray exception (e.g. StateHasChanged after disposal) doesn't kill LoopAsync.
+        }
+    }
+
+    private static async Task<T?> TryFetchAsync<T>(Func<Task<T?>> fetch, T? fallback) where T : class
+    {
+        try { return await fetch(); }
+        catch (OperationCanceledException) { throw; }
+        catch { return fallback; }
+    }
+
+    private record Step(string Name, string Detail, string CssClass);
+
+    private static IEnumerable<Step> BuildSteps(SagaSnapshot s)
+    {
+        // 1. Order placed
+        yield return new Step(
+            "1. Order placed",
+            s.Order is null ? "waiting" : $"id …{s.Order.Id.ToString()[^6..]}",
+            s.Order is null ? "pending" : "done");
+
+        var pay = s.Payment;
+        var res = s.Reservation;
+
+        // 2. Inventory (now first — reserve stock provisionally before charging)
+        yield return res?.Status switch
+        {
+            "Reserved" => new Step("2. Inventory", "stock reserved", "done"),
+            "Released" => new Step("2. Inventory", "released (compensated)", "skipped"),
+            _ when s.Order?.Status == "Cancelled" =>
+                new Step("2. Inventory", "stock unavailable", "failed"),
+            _ when s.Order is not null => new Step("2. Inventory", "reserving", "active"),
+            _ => new Step("2. Inventory", "waiting", "pending")
+        };
+
+        // 3. Payment (only after reservation succeeds)
+        yield return pay?.Status switch
+        {
+            "Succeeded" => new Step("3. Payment", $"charged {pay.Amount:N2}", "done"),
+            "Failed"    => new Step("3. Payment", pay.FailureReason ?? "declined", "failed"),
+            "Refunded"  => new Step("3. Payment", "refunded (compensated)", "skipped"),
+            _ when s.Order?.Status == "Cancelled" && res?.Status != "Reserved" =>
+                new Step("3. Payment", "skipped (no reservation)", "skipped"),
+            _ when s.Order?.Status == "Cancelled" => new Step("3. Payment", "skipped", "skipped"),
+            _ when res?.Status == "Reserved" => new Step("3. Payment", "charging", "active"),
+            _ => new Step("3. Payment", "waiting for reservation", "pending")
+        };
+
+        // 4. Shipping
+        yield return s.Shipment?.Status switch
+        {
+            "Dispatched" => new Step("4. Shipping", $"tracking {s.Shipment.TrackingNumber}", "done"),
+            _ when s.Order?.Status == "Cancelled" => new Step("4. Shipping", "skipped", "skipped"),
+            _ when pay?.Status == "Succeeded" => new Step("4. Shipping", "dispatching", "active"),
+            _ => new Step("4. Shipping", "waiting", "pending")
+        };
+
+        // 5. Order final
+        yield return s.Order?.Status switch
+        {
+            "Completed" => new Step("5. Order", "completed", "done"),
+            "Cancelled" => new Step("5. Order", "cancelled", "failed"),
+            _ => new Step("5. Order", "in progress", "active")
+        };
+    }
+
+    private static string OrderBadge(string s) => s switch
+    {
+        "Completed" => "badge-success",
+        "Cancelled" => "badge-failed",
+        "Pending"   => "badge-pending",
+        _ => "badge-muted"
+    };
+    private static string PaymentBadge(string s) => s switch
+    {
+        "Succeeded" => "badge-success",
+        "Failed"    => "badge-failed",
+        "Refunded"  => "badge-warn",
+        _ => "badge-pending"
+    };
+    private static string ReservationBadge(string s) => s switch
+    {
+        "Reserved" => "badge-success",
+        "Released" => "badge-warn",
+        _ => "badge-muted"
+    };
+    private static string ShipmentBadge(string s) => s switch
+    {
+        "Dispatched" => "badge-success",
+        _ => "badge-pending"
+    };
+
+    private static string FormatTime(DateTimeOffset t)
+        => t.LocalDateTime.ToString("HH:mm:ss.fff");
+
+    // Renders a tiny "+312ms" / "+1.42s" chip showing how long after Order.CreatedAt this
+    // event happened. Makes the saga ordering obvious at a glance even when steps are
+    // within a few hundred milliseconds of each other.
+    private MarkupString Offset(DateTimeOffset t)
+    {
+        if (_snapshot?.Order is null) return new MarkupString(string.Empty);
+        var delta = t - _snapshot.Order.CreatedAt;
+        string label;
+        if (delta.TotalMilliseconds < 0)
+        {
+            // Negative offset shouldn't happen in a single saga but render defensively
+            // so an out-of-order clock or a stale snapshot doesn't crash the page.
+            label = $"{delta.TotalSeconds:0.000}s";
+        }
+        else if (delta.TotalSeconds < 1)
+        {
+            label = $"+{delta.TotalMilliseconds:0}ms";
+        }
+        else
+        {
+            label = $"+{delta.TotalSeconds:0.000}s";
+        }
+        return new MarkupString($"<span class=\"muted offset\">{label}</span>");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _cts.Cancel();
+        if (_loop is not null) { try { await _loop; } catch { } }
+        _cts.Dispose();
+    }
+}

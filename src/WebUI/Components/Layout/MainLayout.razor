@@ -1,0 +1,29 @@
+@inherits LayoutComponentBase
+@inject IConfiguration Cfg
+
+<div class="page">
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="brand-mark">S</div>
+            <div>
+                <div class="brand-title">Saga</div>
+                <div class="brand-sub">Choreography demo</div>
+            </div>
+        </div>
+
+        <NavMenu />
+
+        <div class="sidebar-footer">
+            <div class="external-links">
+                <a href="@Cfg["ExternalLinks:Jaeger"]" target="_blank" rel="noopener">Jaeger</a>
+                <a href="@Cfg["ExternalLinks:RabbitMq"]" target="_blank" rel="noopener">RabbitMQ</a>
+                <a href="@Cfg["ExternalLinks:Grafana"]" target="_blank" rel="noopener">Grafana</a>
+                <a href="@Cfg["ExternalLinks:Prometheus"]" target="_blank" rel="noopener">Prometheus</a>
+            </div>
+        </div>
+    </aside>
+
+    <main class="content">
+        @Body
+    </main>
+</div>

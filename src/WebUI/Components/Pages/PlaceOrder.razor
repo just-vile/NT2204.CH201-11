@@ -1,0 +1,173 @@
+@page "/place-order"
+@inject OrderApiClient OrderApi
+@inject OrderTracker Tracker
+@inject NavigationManager Nav
+
+<h1>Place an order</h1>
+<p class="muted">Each row is a line item. Use the presets to drive the saga down a specific failure path.</p>
+
+<div class="card">
+    <h2>Presets</h2>
+    <div class="btn-row">
+        <button class="btn btn-ghost" @onclick="() => ApplyPreset(Preset.Happy)">Happy path</button>
+        <button class="btn btn-ghost" @onclick="() => ApplyPreset(Preset.PaymentFail)">Trigger payment failure</button>
+        <button class="btn btn-ghost" @onclick="() => ApplyPreset(Preset.InventoryFail)">Trigger inventory failure</button>
+        <button class="btn btn-ghost" @onclick="() => ApplyPreset(Preset.OverLimit)">Over-limit (fraud decline)</button>
+    </div>
+    <div class="muted" style="margin-top: .75rem;">
+        Sentinels in the demo logic: SKU starting with <span class="mono">FAIL_PAY</span> declines payment;
+        <span class="mono">OUT_OF_STOCK</span> fails reservation; total &gt; 100,000 also declines.
+    </div>
+</div>
+
+<div class="card">
+    <h2>Order</h2>
+
+    <div class="form-row">
+        <label>Customer Id</label>
+        <div class="row">
+            <input class="mono" style="flex: 1;" @bind="_customerId" />
+            <button class="btn btn-ghost" @onclick="RegenCustomer">Regenerate</button>
+        </div>
+    </div>
+
+    <h3 style="margin-top: 1rem;">Items</h3>
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 50%;">SKU</th>
+                <th>Qty</th>
+                <th>Unit price</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @for (int i = 0; i < _items.Count; i++)
+            {
+                var idx = i;
+                <tr>
+                    <td><input class="mono" style="width: 100%;" @bind="_items[idx].Sku" /></td>
+                    <td><input type="number" min="1" style="width: 80px;" @bind="_items[idx].Quantity" /></td>
+                    <td><input type="number" step="0.01" min="0" style="width: 120px;" @bind="_items[idx].UnitPrice" /></td>
+                    <td>
+                        <button class="btn btn-danger" @onclick="() => RemoveRow(idx)" disabled="@(_items.Count <= 1)">Remove</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    <div style="margin-top: .5rem;">
+        <button class="btn btn-ghost" @onclick="AddRow">Add item</button>
+    </div>
+
+    <div class="row" style="justify-content: space-between; margin-top: 1rem;">
+        <div>
+            <span class="muted">Total: </span>
+            <strong>@Total.ToString("N2")</strong>
+        </div>
+        <button class="btn btn-primary" @onclick="SubmitAsync" disabled="@_submitting">
+            @if (_submitting) { <span class="spinner"></span> <span>&nbsp;Placing…</span> }
+            else { <span>Place order</span> }
+        </button>
+    </div>
+
+    @if (_error is not null)
+    {
+        <div class="alert alert-error" style="margin-top: 1rem;">@_error</div>
+    }
+</div>
+
+@code {
+    private enum Preset { Happy, PaymentFail, InventoryFail, OverLimit }
+
+    private class ItemRow
+    {
+        public string Sku { get; set; } = "";
+        public int Quantity { get; set; } = 1;
+        public decimal UnitPrice { get; set; }
+    }
+
+    private string _customerId = Guid.NewGuid().ToString();
+    private List<ItemRow> _items = new();
+    private bool _submitting;
+    private string? _error;
+
+    private decimal Total => _items.Sum(i => i.Quantity * i.UnitPrice);
+
+    protected override void OnInitialized()
+    {
+        ApplyPreset(Preset.Happy);
+    }
+
+    private void RegenCustomer() => _customerId = Guid.NewGuid().ToString();
+
+    private void AddRow() => _items.Add(new ItemRow { Sku = "SKU-001", Quantity = 1, UnitPrice = 10.00m });
+
+    private void RemoveRow(int idx)
+    {
+        if (_items.Count > 1) _items.RemoveAt(idx);
+    }
+
+    private void ApplyPreset(Preset p)
+    {
+        _items = p switch
+        {
+            Preset.Happy => new()
+            {
+                new() { Sku = "SKU-001", Quantity = 2, UnitPrice = 19.99m },
+                new() { Sku = "SKU-002", Quantity = 1, UnitPrice = 49.50m }
+            },
+            Preset.PaymentFail => new()
+            {
+                new() { Sku = "FAIL_PAY-A", Quantity = 1, UnitPrice = 25.00m }
+            },
+            Preset.InventoryFail => new()
+            {
+                new() { Sku = "OUT_OF_STOCK-X", Quantity = 1, UnitPrice = 9.99m }
+            },
+            Preset.OverLimit => new()
+            {
+                new() { Sku = "SKU-001", Quantity = 1, UnitPrice = 250000.00m }
+            },
+            _ => _items
+        };
+        _error = null;
+    }
+
+    private async Task SubmitAsync()
+    {
+        _error = null;
+        if (!Guid.TryParse(_customerId, out var customerGuid))
+        {
+            _error = "Customer Id must be a GUID.";
+            return;
+        }
+        if (_items.Count == 0 || _items.Any(i => string.IsNullOrWhiteSpace(i.Sku) || i.Quantity <= 0 || i.UnitPrice < 0))
+        {
+            _error = "Each item needs a SKU, quantity > 0 and a non-negative unit price.";
+            return;
+        }
+
+        _submitting = true;
+        try
+        {
+            var req = new PlaceOrderRequest(
+                customerGuid,
+                _items.Select(i => new PlaceOrderItem(i.Sku.Trim(), i.Quantity, i.UnitPrice)).ToList());
+
+            var idempotencyKey = Guid.NewGuid().ToString("N");
+            var res = await OrderApi.PlaceAsync(req, idempotencyKey);
+            var label = $"{_items.Count} item(s) — {Total:N2}";
+            Tracker.Track(res.Id, label);
+            Nav.NavigateTo($"orders/{res.Id}");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+}

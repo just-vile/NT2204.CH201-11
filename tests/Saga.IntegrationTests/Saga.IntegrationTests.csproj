@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="FluentAssertions" Version="6.12.1" />
+    <PackageReference Include="MassTransit" Version="$(MassTransitVersion)" />
+    <PackageReference Include="MassTransit.RabbitMQ" Version="$(MassTransitVersion)" />
+    <PackageReference Include="MassTransit.TestFramework" Version="$(MassTransitVersion)" />
+    <PackageReference Include="Testcontainers.PostgreSql" Version="3.10.0" />
+    <PackageReference Include="Testcontainers.RabbitMq" Version="3.10.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
+    <PackageReference Include="Npgsql" Version="8.0.5" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Shared\Saga.Shared.Contracts\Saga.Shared.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Shared\Saga.Shared.Infrastructure\Saga.Shared.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\OrderService\Saga.OrderService.csproj" Aliases="OrderSvc" />
+    <ProjectReference Include="..\..\src\PaymentService\Saga.PaymentService.csproj" Aliases="PaymentSvc" />
+    <ProjectReference Include="..\..\src\InventoryService\Saga.InventoryService.csproj" Aliases="InventorySvc" />
+    <ProjectReference Include="..\..\src\ShippingService\Saga.ShippingService.csproj" Aliases="ShippingSvc" />
+  </ItemGroup>
+</Project>

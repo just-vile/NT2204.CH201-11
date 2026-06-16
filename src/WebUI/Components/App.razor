@@ -1,0 +1,18 @@
+@inject IConfiguration Cfg
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <title>Saga — Choreography Demo</title>
+    <link rel="stylesheet" href="app.css" />
+    <link rel="icon" href="data:," />
+    <HeadOutlet />
+</head>
+<body>
+    <Routes @rendermode="InteractiveServer" />
+    <script src="_framework/blazor.web.js"></script>
+</body>
+</html>
