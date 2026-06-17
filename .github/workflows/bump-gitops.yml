@@ -5,8 +5,8 @@
 #   secret  GITOPS_TOKEN  -- PAT with `contents:write` + `pull-requests:write` on
 #                            the gitops repo. The default GITHUB_TOKEN cannot
 #                            modify a *different* repository, so a PAT is required.
-#   var     GITOPS_REPO   -- optional override, e.g. "my-org/saga-gitops".
-#                            Defaults to "${owner}/saga-gitops".
+#   var     GITOPS_REPO   -- optional override, e.g. "my-org/NT2204.CH201-gitops".
+#                            Defaults to "${owner}/NT2204.CH201-gitops".
 #
 # If the gitops repo does not yet exist (the contract may be pushed before gitops
 # is bootstrapped) the workflow exits 0 with a warning so it never blocks merges.
@@ -28,7 +28,7 @@ jobs:
       github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
     env:
-      GITOPS_REPO: ${{ vars.GITOPS_REPO != '' && vars.GITOPS_REPO || format('{0}/saga-gitops', github.repository_owner) }}
+      GITOPS_REPO: ${{ vars.GITOPS_REPO != '' && vars.GITOPS_REPO || format('{0}/NT2204.CH201-gitops', github.repository_owner) }}
       HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
       - name: Compute short sha
