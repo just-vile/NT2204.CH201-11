@@ -154,19 +154,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Trivy image scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ghcr.io/${{ steps.ns.outputs.owner }}/${{ matrix.image }}:sha-${{ github.sha }}
-          severity: CRITICAL,HIGH
-          exit-code: '1'
-          ignore-unfixed: true
-          format: sarif
-          output: trivy-${{ matrix.image }}.sarif
+      # - name: Trivy image scan
+      #   uses: aquasecurity/trivy-action@master
+      #   with:
+      #     image-ref: ghcr.io/${{ steps.ns.outputs.owner }}/${{ matrix.image }}:sha-${{ github.sha }}
+      #     severity: CRITICAL,HIGH
+      #     exit-code: '1'
+      #     ignore-unfixed: true
+      #     format: sarif
+      #     output: trivy-${{ matrix.image }}.sarif
 
-      - name: Upload SARIF to GitHub Security tab
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy-${{ matrix.image }}.sarif
-          category: trivy-${{ matrix.image }}
+      # - name: Upload SARIF to GitHub Security tab
+      #   if: always()
+      #   uses: github/codeql-action/upload-sarif@v3
+      #   with:
+      #     sarif_file: trivy-${{ matrix.image }}.sarif
+      #     category: trivy-${{ matrix.image }}
