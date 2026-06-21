@@ -65,7 +65,13 @@ jobs:
         if: steps.probe.outputs.exists == 'true'
         run: |
           set -euo pipefail
-          sudo wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
+          
+          # Using a fixed version here to avoid breakages from yq's sometimes non-semver releases. See
+          YQ_VERSION="v4.44.3"
+          sudo wget -q https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64 -O /usr/local/bin/yq
+          
+          # sudo wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq
+          
           sudo chmod +x /usr/local/bin/yq
           yq --version
 
