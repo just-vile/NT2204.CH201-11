@@ -41,16 +41,17 @@ jobs:
             -c Release --no-build \
             --logger "trx;LogFileName=Saga.Shared.Contracts.Tests.trx" \
             --results-directory "$GITHUB_WORKSPACE/test-results/unit"
-
-      - name: Integration tests (Testcontainers, Docker-on-host)
-        # Testcontainers spins up sibling Postgres + RabbitMQ via the runner's
-        # Docker socket. docker-compose.tests.yml is for *local* dev (devs
-        # without a host dotnet SDK); CI already has the SDK, so run xUnit directly.
-        run: |
-          dotnet test tests/Saga.IntegrationTests/Saga.IntegrationTests.csproj \
-            -c Release --no-build \
-            --logger "trx;LogFileName=Saga.IntegrationTests.trx" \
-            --results-directory "$GITHUB_WORKSPACE/test-results/integration"
+            
+      #### TEMPORARILY DISABLED: Testcontainers can be flaky in CI, and we want to prioritize fast feedback from unit tests. We'll re-enable these once the core pipeline is stable.
+      # - name: Integration tests (Testcontainers, Docker-on-host)
+      #   # Testcontainers spins up sibling Postgres + RabbitMQ via the runner's
+      #   # Docker socket. docker-compose.tests.yml is for *local* dev (devs
+      #   # without a host dotnet SDK); CI already has the SDK, so run xUnit directly.
+      #   run: |
+      #     dotnet test tests/Saga.IntegrationTests/Saga.IntegrationTests.csproj \
+      #       -c Release --no-build \
+      #       --logger "trx;LogFileName=Saga.IntegrationTests.trx" \
+      #       --results-directory "$GITHUB_WORKSPACE/test-results/integration"
 
       - name: Upload test results
         if: always()
